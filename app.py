@@ -149,7 +149,7 @@ else:
     # 기존 대비 가로·세로 1.5배: 높이 1.5×, 폰트 1.5×
     SCALE = 1.2
     base_row_h = 44
-    heat_height = int(max(320, base_row_h * max(1, len(pivot.index))))
+    heat_height = int(max(280, base_row_h * max(1, len(pivot.index))))
     heat_height = int(heat_height * SCALE)
 
     fig_hm = px.imshow(
