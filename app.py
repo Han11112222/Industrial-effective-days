@@ -1,14 +1,4 @@
-# app.py — 요일/공휴일 공급량 비중(%) 분석 (히트맵 우선/가로 버튼/CAGR 추가판)
-# - GitHub raw XLSX/CSV 로딩(blob → raw 자동 변환)
-# - 월 총공급량 대비 요일/공휴일 공급량 비중(%) 계산
-# - 연도 선택(사이드바), 카테고리 가로형 버튼 선택
-# - 시각화:
-#   (1) 카테고리별 월별 히트맵(가장 먼저, 크게)
-#   (2) 연간 평균 비중(%) 카테고리별 추세선(그래프 위 가로형 버튼으로 넣고/빼고)
-# - 표:
-#   (A) 월별 상세표(기존 유지)
-#   (B) 최근 5년 CAGR & p.p. 변화(요일/공휴일별)
-# - 빈 달/미래연도(월총공급량=0) 제거
+# app.py — 요일/공휴일 공급량 비중(%) 분석 (히트맵 1.5배 확대판)
 
 import re
 from urllib.parse import urlparse
@@ -84,17 +74,11 @@ def parse_date8(s):
     return pd.to_datetime(s, errors="coerce")
 
 def ui_pills(label: str, options: list, default, multi=True):
-    """
-    최신 Streamlit이면 st.pills 사용, 아니면 multiselect로 폴백.
-    multi=True면 다중선택, False면 단일선택(segmented처럼 동작).
-    """
     try:
-        # Streamlit >= 1.32
         if multi:
             return st.pills(label, options=options, selection_mode="multi", default=default)
         else:
-            sel = st.pills(label, options=options, selection_mode="single", default=default)
-            return sel
+            return st.pills(label, options=options, selection_mode="single", default=default)
     except Exception:
         if multi:
             return st.multiselect(label, options=options, default=default)
@@ -131,16 +115,12 @@ def cat_fn(r):
     return r["요일"]
 df["카테고리"] = df.apply(cat_fn, axis=1)
 
-# 월 총공급량, 카테고리 공급량
 m_total = df.groupby(["연","월"], dropna=False)["공급량(MJ)"].sum().rename("월총공급량")
 m_cat = df.groupby(["연","월","카테고리"], dropna=False)["공급량(MJ)"].sum().rename("카테고리공급량").reset_index()
 m = m_cat.merge(m_total, on=["연","월"], how="left")
-
-# **빈 달/미래연도 제거**: 월총공급량>0만 유지
-m = m[m["월총공급량"] > 0].copy()
+m = m[m["월총공급량"] > 0].copy()  # 빈 달 제거
 m["비중(%)"] = m["카테고리공급량"] / m["월총공급량"] * 100
 
-# 연도/카테고리
 weekday_order = ["월","화","수","목","금","토","일","공휴일"]
 cats_all = [c for c in weekday_order if c in m["카테고리"].unique()]
 valid_years = [int(y) for y in sorted(m["연"].dropna().unique())]
@@ -154,9 +134,9 @@ view = m[m["연"].isin(sel_years)].copy()
 st.divider()
 
 # ───────────────────────────
-# (1) 카테고리별 월별 히트맵 — 먼저 보여주기 + 가로 버튼
+# (1) 히트맵 — 1.5배 확대
 # ───────────────────────────
-st.subheader("🧊 월별 히트맵 — 카테고리 선택")
+st.subheader("🧊 월별 히트맵 — 카테고리 선택 (1.5× 확대)")
 default_cat = "금" if "금" in cats_all else cats_all[0]
 target_cat = ui_pills("히트맵에 볼 카테고리", options=cats_all, default=default_cat, multi=False)
 
@@ -165,48 +145,42 @@ if hm.empty:
     st.info("선택된 연도/카테고리에 해당하는 데이터가 없습니다.")
 else:
     pivot = hm.pivot_table(index="연", columns="월", values="비중(%)", aggfunc="mean")
-pivot = pivot.reindex(index=sorted(pivot.index), columns=range(1,13))
+    pivot = pivot.reindex(index=sorted(pivot.index), columns=range(1,13))
+    # 기존 대비 가로·세로 1.5배: 높이 1.5×, 폰트 1.5×
+    SCALE = 1.5
+    base_row_h = 44
+    heat_height = int(max(520, base_row_h * max(1, len(pivot.index))))
+    heat_height = int(heat_height * SCALE)
 
-# 행(연도 수)에 비례 + 배율 반영
-base_row_h = 52  # 기본 한 행 높이(px)
-heat_height = int(max(600, base_row_h * max(1, len(pivot.index)) * heat_scale))
+    fig_hm = px.imshow(
+        pivot.values,
+        x=list(range(1,13)), y=[int(i) for i in pivot.index],
+        color_continuous_scale="Viridis", origin="upper",
+        labels=dict(color="비중(%)", x="월", y="연"), height=heat_height
+    )
+    text_vals = np.where(np.isnan(pivot.values), "", np.vectorize(lambda v: f"{v:.1f}")(pivot.values))
+    fig_hm.update_traces(text=text_vals, texttemplate="%{text}", textfont=dict(size=int(10*SCALE)))
+    fig_hm.update_layout(
+        margin=dict(l=60, r=20, t=10, b=50),
+        font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"),
+        xaxis=dict(tickfont=dict(size=int(12*SCALE))),
+        yaxis=dict(tickfont=dict(size=int(12*SCALE)))
+    )
+    # 칸 간격도 약간 늘려 가독성 확보
+    fig_hm.update_traces(xgap=1, ygap=1)
 
-fig_hm = px.imshow(
-    pivot.values,
-    x=list(range(1,13)), y=[int(i) for i in pivot.index],
-    color_continuous_scale="Viridis", origin="upper",
-    labels=dict(color="비중(%)", x="월", y="연"), height=heat_height
-)
-
-# 셀 숫자 라벨
-text_vals = np.where(np.isnan(pivot.values), "", np.vectorize(lambda v: f"{v:.1f}")(pivot.values))
-fig_hm.update_traces(text=text_vals, texttemplate="%{text}", textfont=dict(size=cell_font))
-
-# 여백 줄이고 축 글자 크게
-fig_hm.update_layout(
-    margin=dict(l=60, r=20, t=10, b=50),
-    font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"),
-    xaxis=dict(tickfont=dict(size=axis_font)),
-    yaxis=dict(tickfont=dict(size=axis_font))
-)
-
-# 칸 간격 살짝 넓히기(가독성 ↑)
-fig_hm.update_traces(xgap=1, ygap=1)
-
-st.plotly_chart(fig_hm, use_container_width=True)
-
+    st.plotly_chart(fig_hm, use_container_width=True)
 
 st.divider()
 
 # ───────────────────────────
-# (2) 연간 평균 비중(%) — 카테고리별 추세선 (그래프 위 가로 버튼)
+# (2) 연간 평균 비중(%) — 카테고리별 추세선 (가로 버튼)
 # ───────────────────────────
 st.subheader("📈 연간 평균 비중(%) — 카테고리별 **추세선**")
 year_cat = view.groupby(["연","카테고리"], as_index=False)["비중(%)"].mean()
 year_cat["카테고리"] = pd.Categorical(year_cat["카테고리"], categories=cats_all, ordered=True)
 year_cat = year_cat.sort_values(["카테고리","연"])
 
-# 가로형 멀티 버튼
 sel_cats_trend = ui_pills("표시할 카테고리(여러 개 선택 가능)", options=cats_all, default=cats_all, multi=True)
 
 trend_df = year_cat[year_cat["카테고리"].isin(sel_cats_trend)].copy()
@@ -236,7 +210,7 @@ st.plotly_chart(fig_tr, use_container_width=True)
 st.divider()
 
 # ───────────────────────────
-# (3) 상세 테이블 + 다운로드 (기존 유지)
+# (3) 상세 테이블 + 다운로드 (그대로)
 # ───────────────────────────
 st.subheader("📄 상세 테이블(연·월·카테고리)")
 table = view.sort_values(["연","월","카테고리"]).copy()
@@ -251,13 +225,12 @@ st.download_button("CSV 다운로드(현재 보기)", data=table.to_csv(index=Fa
 st.divider()
 
 # ───────────────────────────
-# (4) 최근 5년 CAGR & p.p. 변화 (요일/공휴일별)
+# (4) 최근 5년 CAGR & p.p. 변화 (그대로)
 # ───────────────────────────
 st.subheader("📌 최근 5년 요일/공휴일 **월평균 성장률(CAGR)** 및 p.p. 변화")
-yc = year_cat.copy()  # 연간 평균 비중(%) 기준
+yc = year_cat.copy()
 years_sorted = sorted(yc["연"].unique())
 if len(years_sorted) >= 2:
-    # 최근 5개 연도(있으면 5개, 아니면 가능한 만큼)
     last_years = years_sorted[-min(5, len(years_sorted)):]
     out_rows = []
     for c in cats_all:
@@ -265,11 +238,8 @@ if len(years_sorted) >= 2:
         if len(s) >= 2:
             first = s["비중(%)"].iloc[0]
             last  = s["비중(%)"].iloc[-1]
-            n = len(s) - 1  # 간격 수
-            if first > 0:
-                cagr = (last/first)**(1/n) - 1
-            else:
-                cagr = np.nan
+            n = len(s) - 1
+            cagr = (last/first)**(1/n) - 1 if first > 0 else np.nan
             out_rows.append({
                 "카테고리": c,
                 "기간": f"{int(s['연'].iloc[0])}–{int(s['연'].iloc[-1])}",
@@ -291,16 +261,14 @@ else:
     st.info("연도 수가 2개 미만이라 CAGR을 계산할 수 없습니다.")
 
 # ───────────────────────────
-# (5) 자동 요약/결론 (간단)
+# (5) 간단 요약/결론 (그대로)
 # ───────────────────────────
 msgs = []
-# 금요일 요약
 if "금" in year_cat["카테고리"].unique():
     s = year_cat[year_cat["카테고리"]=="금"].sort_values("연")
     if len(s)>=2:
         diff  = s["비중(%)"].iloc[-1] - s["비중(%)"].iloc[0]
         msgs.append(f"- **금요일 연간 평균 비중**: 기간 처음 대비 최근 {diff:+.2f}p 변화")
-# 전체 증가/감소
 chg = []
 for c in cats_all:
     s = year_cat[year_cat["카테고리"]==c].sort_values("연")
@@ -312,6 +280,5 @@ if chg:
     dec = [f"{c} ({d:.2f}p)" for c,d in chg if d<0]
     if inc: msgs.append("- **비중이 늘어난 쪽**: " + ", ".join(inc))
     if dec: msgs.append("- **비중이 줄어든 쪽**: " + ", ".join(dec))
-
 if msgs:
     st.markdown("\n".join(msgs))
