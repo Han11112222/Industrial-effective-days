@@ -1,9 +1,9 @@
-# app.py — 요일/공휴일 공급량 비중(%) 분석 (개선판)
+# app.py — 요일/공휴일 공급량 비중(%) 분석 (오류 수정판)
 # - GitHub raw XLSX/CSV 로딩(blob → raw 자동 변환)
-# - 월별 총공급량 대비 요일/공휴일 공급량 비중(%)  =  (해당 카테고리 공급량 ÷ 월 총공급량)×100
+# - 월 총공급량 대비 요일/공휴일 공급량 비중(%)  =  (해당 카테고리 공급량 ÷ 월 총공급량)×100
 # - 연도 선택(사이드바), 요일/공휴일 멀티선택
-# - 히트맵(크게), 100% 누적 막대(연도별 구조변화), 요일별 추세선(빈 달/미래연도 자동 제거)
-# - 하단에 자동 **요약/결론** 출력
+# - 히트맵(크게), 100% 누적 막대(연간 구조 변화), 요일별 추세선(빈 달/미래연도 제거)
+# - 하단 자동 요약/결론
 
 import re
 from urllib.parse import urlparse
@@ -20,14 +20,14 @@ st.title("📊 월별 총공급량 대비 요일·공휴일 **공급량 비중(%
 st.caption("※ ‘공급량 비중’은 월 총공급량에서 선택된 요일/공휴일이 차지하는 비중(%)을 의미")
 
 # ───────────────────────────
-# Sidebar (연도 선택은 좌측)
+# Sidebar
 # ───────────────────────────
 with st.sidebar:
     st.header("⚙️ 설정")
     raw_url = st.text_input(
         "GitHub raw 파일 URL (xlsx/csv)",
         value="https://raw.githubusercontent.com/Han11112222/Industrial-effective-days/main/effective_days_calendar.xlsx",
-        help="파일 페이지의 **Raw** 주소. blob 주소를 넣어도 자동 변환됨."
+        help="파일 페이지의 Raw 주소. blob 주소를 넣어도 자동 변환됨."
     )
     split_holiday = st.radio(
         "공휴일을 별도 카테고리로 분리(합계 100%)",
@@ -59,7 +59,7 @@ def load_df(url: str) -> pd.DataFrame:
     h.raise_for_status()
 
     if url.lower().endswith((".xlsx",".xls")):
-        import openpyxl
+        import openpyxl  # noqa: F401
         df = pd.read_excel(url, engine="openpyxl")
     elif url.lower().endswith(".csv"):
         try: df = pd.read_csv(url, encoding="cp949")
@@ -103,7 +103,6 @@ df["요일"] = df["요일"].astype(str).str.strip()
 df["공휴일여부"] = df["공휴일여부"].astype(str).str.upper().isin(["TRUE","T","1","Y","YES"])
 df["공급량(MJ)"] = df["공급량(MJ)"].apply(to_float)
 
-# 공휴일 분리/미분리 카테고리
 def cat_fn(r):
     if split_holiday and r["공휴일여부"]:
         return "공휴일"
@@ -143,14 +142,13 @@ pivot = hm.pivot_table(index="연", columns="월", values="비중(%)", aggfunc="
 )
 
 st.subheader(f"🧊 연·월 히트맵 — **{target_cat} 공급량 비중(%)**")
-heat_height = max(480, 42 * len(pivot.index))  # 연도에 비례해 자동 확대
+heat_height = max(480, 42 * max(1, len(pivot.index)))  # 연도수에 비례 확대
 fig_hm = px.imshow(
     pivot.values,
     x=list(range(1,13)), y=[int(i) for i in pivot.index],
     color_continuous_scale="Viridis", origin="upper",
     labels=dict(color="비중(%)", x="월", y="연"), height=heat_height
 )
-# 셀 값 텍스트
 text_vals = np.where(np.isnan(pivot.values), "", np.vectorize(lambda v: f"{v:.1f}")(pivot.values))
 fig_hm.update_traces(text=text_vals, texttemplate="%{text}", textfont=dict(size=10))
 fig_hm.update_layout(margin=dict(l=50,r=20,t=10,b=40), font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"))
@@ -175,21 +173,20 @@ st.divider()
 
 # ───────────────────────────
 # 3) 요일/공휴일별 추세선 (빈 달 제거)
-#    - 선택: 여러 카테고리를 비교할 수 있도록 멀티선택
 # ───────────────────────────
 st.subheader("📈 요일/공휴일별 동적 추세선 — 월별 비중(%)")
 sel_cats = st.multiselect("비교할 카테고리 선택", options=cats_all,
                           default=["금"] if "금" in cats_all else cats_all[:2])
 
 ts = view[view["카테고리"].isin(sel_cats)].copy()
-ts["t"] = ts["연"].astype(int)*12 + ts["월"].astype(int)  # 시간 축
+ts["t"] = ts["연"].astype(int)*12 + ts["월"].astype(int)
 ts = ts.sort_values(["카테고리","연","월"])
 
 fig_ts = go.Figure()
 summary_rows = []
 for c in sel_cats:
     s = ts[ts["카테고리"]==c].dropna(subset=["비중(%)"])
-    s = s[(s["월총공급량"]>0)]  # 안전망
+    s = s[(s["월총공급량"]>0)]
     s["연월"] = s["연"].astype(int).astype(str) + "-" + s["월"].astype(int).astype(str).str.zfill(2)
     fig_ts.add_trace(go.Scatter(x=s["연월"], y=s["비중(%)"], mode="lines+markers", name=f"{c}"))
     if len(s) >= 3:
@@ -197,14 +194,13 @@ for c in sel_cats:
         trend = a*s["t"] + b
         fig_ts.add_trace(go.Scatter(x=s["연월"], y=trend, mode="lines",
                                     name=f"{c} 추세", line=dict(dash="dash")))
-        # 연간 변화량(pp/년) 근사: a*(12)  → t는 월 단위이므로 12배
-        slope_year = a*12
-        # 최근 3년 vs 초기 3년 평균 차이(pp)
+        slope_year = a*12  # 월 단위 계수 → 연 단위 p.p./년
         s["연_int"] = s["연"].astype(int)
         early = s[s["연_int"] <= s["연_int"].min()+2]["비중(%)"].mean()
         late  = s[s["연_int"] >= s["연_int"].max()-2]["비중(%)"].mean()
-        delta = late - early
-        summary_rows.append({"카테고리": c, "연간 기울기(pp/년)": slope_year, "초기3년→최근3년 변화(pp)": delta})
+        summary_rows.append({"카테고리": c,
+                             "연간 기울기(pp/년)": float(slope_year),
+                             "초기3년→최근3년 변화(pp)": float(late - early)})
 
 fig_ts.update_layout(xaxis_title="연-월", yaxis_title="비중(%)",
                      font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"),
@@ -227,10 +223,11 @@ st.download_button("CSV 다운로드(현재 보기)", data=table.to_csv(index=Fa
 st.divider()
 
 # ───────────────────────────
-# 5) 자동 요약/결론
+# 5) 자동 요약/결론  (⬅️ 오류났던 부분 깔끔히 교체)
 # ───────────────────────────
 st.subheader("🧭 요약 및 결론")
 txts = []
+
 # (a) 금요일 중심 요약
 if "금" in m["카테고리"].unique():
     s = view[view["카테고리"]=="금"]
@@ -243,18 +240,17 @@ if "금" in m["카테고리"].unique():
             direction = "감소" if diff < 0 else "증가"
             txts.append(f"- **금요일 연평균 비중**: 초기 3년 대비 최근 3년 {abs(diff):.2f}p.p. **{direction}**")
 
-# (b) 요일/공휴일 전반 구조 변화(연 평균, 최근 vs 초기)
+# (b) 전체 구조 변화(연 평균, 최근 vs 초기)
 year_cat_all = view.groupby(["연","카테고리"], as_index=False)["비중(%)"].mean()
+weekday_order2 = [c for c in weekday_order if c in year_cat_all["카테고리"].unique()]
 summary_change = []
-for c in cats_all:
-    s = year_cat_all[year_cat_all["카테고리"]==c]
+for c in weekday_order2:
+    s = year_cat_all[year_cat_all["카테고리"]==c].sort_values("연")
     if len(s)>=2:
-        s = s.sort_values("연")
         early = s["비중(%)"].iloc[:min(3,len(s))].mean()
         late  = s["비중(%)"].iloc[-min(3,len(s)) :].mean()
         summary_change.append((c, late-early))
 if summary_change:
-    # 큰 변화순 정렬
     summary_change.sort(key=lambda x: x[1], reverse=True)
     inc = [f"{c} (+{d:.2f}p)" for c,d in summary_change if d>0]
     dec = [f"{c} ({d:.2f}p)" for c,d in summary_change if d<0]
@@ -263,16 +259,9 @@ if summary_change:
 
 # (c) 추세선 요약(선택 카테고리)
 if summary_rows:
-    summary_rows = pd.DataFrame(summary_rows).sort_values("연간 기울기(pp/년)", ascending=False)
-    top_inc = summary_rows.iloc[0]
-    top_dec = summary_rows.iloc[-1]
-    if top_inc["연간 기울기(pp/년]".replace if needed else 0):
-        pass
-# 안정적으로 텍스트 출력
-if summary_rows:
     sr = pd.DataFrame(summary_rows).sort_values("연간 기울기(pp/년)", ascending=False)
-    inc_line = f"- **추세선 기준 증가 1위**: {sr.iloc[0]['카테고리']} (기울기 {sr.iloc[0]['연간 기울기(pp/년)']:.2f}p/년, 최근-초기 {sr.iloc[0]['초기3년→최근3년 변화(pp)']:.2f}p)"
-    dec_line = f"- **추세선 기준 감소 1위**: {sr.iloc[-1]['카테고리']} (기울기 {sr.iloc[-1]['연간 기울기(pp/년)']:.2f}p/년, 최근-초기 {sr.iloc[-1]['초기3년→최근3년 변화(pp)']:.2f}p)"
+    inc_line = f"- **추세선 증가 1위**: {sr.iloc[0]['카테고리']} (기울기 {sr.iloc[0]['연간 기울기(pp/년)']:.2f}p/년, 최근-초기 {sr.iloc[0]['초기3년→최근3년 변화(pp)']:.2f}p)"
+    dec_line = f"- **추세선 감소 1위**: {sr.iloc[-1]['카테고리']} (기울기 {sr.iloc[-1]['연간 기울기(pp/년)']:.2f}p/년, 최근-초기 {sr.iloc[-1]['초기3년→최근3년 변화(pp)']:.2f}p)"
     txts.extend([inc_line, dec_line])
 
 if not txts:
