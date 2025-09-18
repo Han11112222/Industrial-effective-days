@@ -165,19 +165,36 @@ if hm.empty:
     st.info("선택된 연도/카테고리에 해당하는 데이터가 없습니다.")
 else:
     pivot = hm.pivot_table(index="연", columns="월", values="비중(%)", aggfunc="mean")
-    pivot = pivot.reindex(index=sorted(pivot.index), columns=range(1,13))
-    heat_height = max(520, 44 * max(1, len(pivot.index)))
-    fig_hm = px.imshow(
-        pivot.values,
-        x=list(range(1,13)), y=[int(i) for i in pivot.index],
-        color_continuous_scale="Viridis", origin="upper",
-        labels=dict(color="비중(%)", x="월", y="연"), height=heat_height
-    )
-    text_vals = np.where(np.isnan(pivot.values), "", np.vectorize(lambda v: f"{v:.1f}")(pivot.values))
-    fig_hm.update_traces(text=text_vals, texttemplate="%{text}", textfont=dict(size=10))
-    fig_hm.update_layout(margin=dict(l=50,r=20,t=10,b=40),
-                         font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"))
-    st.plotly_chart(fig_hm, use_container_width=True)
+pivot = pivot.reindex(index=sorted(pivot.index), columns=range(1,13))
+
+# 행(연도 수)에 비례 + 배율 반영
+base_row_h = 52  # 기본 한 행 높이(px)
+heat_height = int(max(600, base_row_h * max(1, len(pivot.index)) * heat_scale))
+
+fig_hm = px.imshow(
+    pivot.values,
+    x=list(range(1,13)), y=[int(i) for i in pivot.index],
+    color_continuous_scale="Viridis", origin="upper",
+    labels=dict(color="비중(%)", x="월", y="연"), height=heat_height
+)
+
+# 셀 숫자 라벨
+text_vals = np.where(np.isnan(pivot.values), "", np.vectorize(lambda v: f"{v:.1f}")(pivot.values))
+fig_hm.update_traces(text=text_vals, texttemplate="%{text}", textfont=dict(size=cell_font))
+
+# 여백 줄이고 축 글자 크게
+fig_hm.update_layout(
+    margin=dict(l=60, r=20, t=10, b=50),
+    font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"),
+    xaxis=dict(tickfont=dict(size=axis_font)),
+    yaxis=dict(tickfont=dict(size=axis_font))
+)
+
+# 칸 간격 살짝 넓히기(가독성 ↑)
+fig_hm.update_traces(xgap=1, ygap=1)
+
+st.plotly_chart(fig_hm, use_container_width=True)
+
 
 st.divider()
 
