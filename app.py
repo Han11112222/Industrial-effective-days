@@ -134,9 +134,9 @@ view = m[m["연"].isin(sel_years)].copy()
 st.divider()
 
 # ───────────────────────────
-# (1) 히트맵 — 1.5배 확대
+# (1) 히트맵 
 # ───────────────────────────
-st.subheader("🧊 월별 히트맵 — 카테고리 선택 (1.5× 확대)")
+st.subheader("🧊 월별 히트맵 — 카테고리 선택")
 default_cat = "금" if "금" in cats_all else cats_all[0]
 target_cat = ui_pills("히트맵에 볼 카테고리", options=cats_all, default=default_cat, multi=False)
 
@@ -147,7 +147,7 @@ else:
     pivot = hm.pivot_table(index="연", columns="월", values="비중(%)", aggfunc="mean")
     pivot = pivot.reindex(index=sorted(pivot.index), columns=range(1,13))
     # 기존 대비 가로·세로 1.5배: 높이 1.5×, 폰트 1.5×
-    SCALE = 1.5
+    SCALE = 1.2
     base_row_h = 44
     heat_height = int(max(520, base_row_h * max(1, len(pivot.index))))
     heat_height = int(heat_height * SCALE)
