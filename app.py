@@ -141,18 +141,43 @@ pivot = hm.pivot_table(index="연", columns="월", values="비중(%)", aggfunc="
     index=sorted(hm["연"].unique()), columns=range(1,13)
 )
 
-st.subheader(f"🧊 연·월 히트맵 — **{target_cat} 공급량 비중(%)**")
-heat_height = max(480, 42 * max(1, len(pivot.index)))  # 연도수에 비례 확대
-fig_hm = px.imshow(
-    pivot.values,
-    x=list(range(1,13)), y=[int(i) for i in pivot.index],
-    color_continuous_scale="Viridis", origin="upper",
-    labels=dict(color="비중(%)", x="월", y="연"), height=heat_height
+# ───────────────────────────
+# 2) 연도별 구조 변화 — 100% 누적 막대 (전체 카테고리)  ← 교체본
+# ───────────────────────────
+st.subheader("🧱 연도별 구조 변화 — 모든 요일/공휴일 **연간 평균 비중(%)** (100% 기준)")
+
+# 1) 연·카테고리 평균 비중 집계
+year_cat = view.groupby(["연","카테고리"], as_index=False)["비중(%)"].mean()
+
+# 2) 연도별로 합이 100이 되도록 정규화 (barnorm 사용 안 함)
+norm = (
+    year_cat
+    .groupby("연", as_index=False)["비중(%)"].sum()
+    .rename(columns={"비중(%)":"합계"})
 )
-text_vals = np.where(np.isnan(pivot.values), "", np.vectorize(lambda v: f"{v:.1f}")(pivot.values))
-fig_hm.update_traces(text=text_vals, texttemplate="%{text}", textfont=dict(size=10))
-fig_hm.update_layout(margin=dict(l=50,r=20,t=10,b=40), font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic"))
-st.plotly_chart(fig_hm, use_container_width=True)
+year_cat = year_cat.merge(norm, on="연", how="left")
+year_cat["연간 정규화(%)"] = np.where(year_cat["합계"]>0,
+                                  year_cat["비중(%)"] / year_cat["합계"] * 100, 0.0)
+
+# 3) 요일 순서 정렬(있을 때만)
+weekday_order = ["월","화","수","목","금","토","일","공휴일"]
+cats_in = [c for c in weekday_order if c in year_cat["카테고리"].unique()]
+year_cat["카테고리"] = pd.Categorical(year_cat["카테고리"], categories=cats_in, ordered=True)
+year_cat = year_cat.sort_values(["연","카테고리"])
+
+# 4) 100% 누적 막대 (stack)
+fig_stack = px.bar(
+    year_cat, x="연", y="연간 정규화(%)", color="카테고리",
+    labels={"연":"연도","연간 정규화(%)":"연 평균 비중(%)"},
+)
+fig_stack.update_layout(
+    barmode="stack",  # 누적
+    yaxis=dict(range=[0, 100]),
+    margin=dict(l=30,r=20,t=10,b=40),
+    xaxis=dict(type="category"),
+    font=dict(family="Noto Sans KR, Nanum Gothic, Malgun Gothic")
+)
+st.plotly_chart(fig_stack, use_container_width=True)
 
 st.divider()
 
